@@ -29,7 +29,7 @@ class HyperparamAgent:
     @staticmethod
     def run(task: str, feedback: str = None):
         
-        sys = "You are a PINN optimization expert. Output ONLY valid JSON."
+        sys = "You are a PINN optimization expert. Output ONLY one valid JSON object containing a single set of parameters."
         
         if feedback:
             instruction = (

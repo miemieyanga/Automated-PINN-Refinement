@@ -135,87 +135,102 @@ PROBLEMS = {
     },
 "burgers_1d": {
         "description": "1D Burgers Eq: u_t + u*u_x - (0.01/pi)*u_xx = 0. Domain: x[-1,1], t[0,1].",
-        "input_dim": 2,  # 【关键】输入是 (t, x) 两个维度
-        "output_dim": 1, # 输出是 u 一个维度
-        "domain_range": [-1.0, 1.0], # 这里主要指空间 x 的范围，时间 t 通常在内部处理或归一化
+        "input_dim": 2,
+        "output_dim": 1,
+        "domain_range": [-1.0, 1.0],
         
-        # 物理方程: u_t + u*u_x - nu*u_xx = 0
+        # 物理 Loss (保持不变)
         "physics_code": """
-    # x_in 的形状是 [N, 2]。
-    # 我们约定: x_in[:, 0] 是 t (时间), x_in[:, 1] 是 x (空间)
-    # (注意：这取决于你怎么生成数据，通常习惯 t在前或 x在前，这里假设 input=[t, x])
-    
     u = y
-    
-    # 求一阶导数 (对 t 和 x)
     du_dinput = autograd.grad(u, x, torch.ones_like(u), create_graph=True)[0]
     du_dt = du_dinput[:, 0:1]
     du_dx = du_dinput[:, 1:2]
-    
-    # 求二阶导数 (对 x)
     du_dxx = autograd.grad(du_dx, x, torch.ones_like(du_dx), create_graph=True)[0][:, 1:2]
-    
-    # Burgers 参数
     viscosity = 0.01 / math.pi
-    
-    # 残差
     res = du_dt + u * du_dx - viscosity * du_dxx
     return (res**2).mean()
 """,
         
-        # 边界条件 (BC) + 初始条件 (IC)
+        # 边界 Loss (保持不变)
         "boundary_code": """
-    # 这是一个混合 Loss，包含 IC (t=0) 和 BC (x=-1, x=1)
-    
-    # 1. IC: t=0, x in [-1, 1]. u(0,x) = -sin(pi*x)
-    # 随机采样空间点
-    x_space = torch.rand(N_COL // 2, 1, device=device) * 2.0 - 1.0 # [-1, 1]
+    x_space = torch.rand(N_COL // 2, 1, device=device) * 2.0 - 1.0
     t_zero  = torch.zeros_like(x_space)
-    # 拼接成 (t, x) 输入
     in_ic = torch.cat([t_zero, x_space], dim=1).requires_grad_(True)
     u_ic_pred = model(in_ic)
     u_ic_true = -torch.sin(math.pi * x_space)
     loss_ic = ((u_ic_pred - u_ic_true)**2).mean()
     
-    # 2. BC: x=-1 和 x=1, t in [0, 1]. u(t, -1) = u(t, 1) = 0
-    t_time = torch.rand(N_COL // 2, 1, device=device) # [0, 1]
+    t_time = torch.rand(N_COL // 2, 1, device=device)
     x_neg  = torch.ones_like(t_time) * -1.0
     x_pos  = torch.ones_like(t_time) * 1.0
-    
     in_bc_neg = torch.cat([t_time, x_neg], dim=1)
     in_bc_pos = torch.cat([t_time, x_pos], dim=1)
-    
     u_bc_neg = model(in_bc_neg)
     u_bc_pos = model(in_bc_pos)
-    
     loss_bc = (u_bc_neg**2).mean() + (u_bc_pos**2).mean()
-    
     return loss_ic + loss_bc
 """,
+
+"plotting_code": """
+        import numpy as np
+        from scipy.integrate import solve_ivp
+
+        # 1. 准备网格
+        N_grid = 256  #稍微增加一点网格密度
+        x_np = np.linspace(-1, 1, N_grid)
+        dx = x_np[1] - x_np[0]
+        viscosity = 0.01 / np.pi
+
+        # 2. 定义 ODE 系统 (使用稳定的 Upwind 迎风格式)
+        def burgers_rhs(t, u):
+            # 边界条件 u[-1]=0, u[1]=0
+            u_padded = np.pad(u, (1,1), mode='constant', constant_values=0)
+            
+            u_center = u_padded[1:-1]
+            u_left   = u_padded[:-2]
+            u_right  = u_padded[2:]
+            
+            # --- 关键修改：迎风格式 (Upwind Scheme) ---
+            # 如果流速 u > 0，信息从左边来，用后向差分 (u_center - u_left)
+            # 如果流速 u < 0，信息从右边来，用前向差分 (u_right - u_center)
+            dudx_back = (u_center - u_left) / dx
+            dudx_fwd  = (u_right - u_center) / dx
+            
+            # np.where 选择合适的差分方向
+            convection = np.where(u_center > 0, u_center * dudx_back, u_center * dudx_fwd)
+            
+            # 扩散项依然用中心差分 (它是稳定的)
+            diffusion = viscosity * (u_right - 2*u_center + u_left) / (dx**2)
+            
+            return -convection + diffusion
+
+        # 3. 初始条件
+        u0 = -np.sin(np.pi * x_np)
         
-        # 绘图: 画热力图比较炫酷，或者画几个时间切片
-        "plotting_code": """
-        # 为了简化，我们画 t=0.5 时刻的 u(x) 切片对比
-        # 真值通常需要解析解或数值模拟，这里用近似解析解或跳过真值对比，
-        # 或者我们只画 t=0.5 的预测曲线看是否平滑
+        # 4. 求解
+        t_target = 0.5
+        # 既然用了迎风格式，普通的 RK45 (默认) 其实就够稳了，BDF 也行
+        sol = solve_ivp(burgers_rhs, [0, t_target], u0, method='RK45')
+        u_true = sol.y[:, -1]
         
-        # 构造 t=0.5 的输入
-        t_slice = 0.5
-        x_eval = torch.linspace(-1, 1, 100, device=device).unsqueeze(1)
-        t_eval = torch.ones_like(x_eval) * t_slice
+        # 5. PINN 预测
+        x_eval = torch.tensor(x_np, dtype=torch.float32, device=device).unsqueeze(1)
+        t_eval = torch.ones_like(x_eval) * t_target
         in_eval = torch.cat([t_eval, x_eval], dim=1)
         
-        u_pred = model(in_eval)
+        model.eval()
+        u_pred = model(in_eval).detach().cpu().numpy().flatten()
         
-        plt.plot(x_eval.cpu().numpy(), u_pred.cpu().numpy(), 'r-', label=f'PINN t={t_slice}')
-        plt.xlabel("x")
-        plt.ylabel("u")
-        plt.title(f"Burgers Equation (Slice at t={t_slice})")
-        
-        # 对于 PDE，单点 MSE 很难算，通常只算 Loss
-        # 这里给个占位符
-        mse = 0.0
-        mae = 0.0
+        # 6. 计算指标
+        mse = np.mean((u_true - u_pred)**2)
+        mae = np.mean(np.abs(u_true - u_pred))
+
+        # 7. 绘图
+        plt.ylim(-1.2, 1.2)
+        plt.plot(x_np, u_true, 'b-', label='Truth (Upwind)', linewidth=2, alpha=0.6)
+        plt.plot(x_np, u_pred, 'r--', label=f'PINN (t={t_target})', linewidth=2)
+        plt.title(f"Burgers Eq t={t_target} (MSE: {mse:.2e})")
+        plt.xlabel("x"); plt.ylabel("u")
 """
     }
 }

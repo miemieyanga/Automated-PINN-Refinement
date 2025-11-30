@@ -13,7 +13,7 @@ class ReflectionAgent:
 
         # --- 精简且开放的 System Prompt ---
         sys = f"""You are an expert PINN optimization coach. 
-Diagnose the failure based on the Visual Description and Metrics (MSE/MAE).
+Diagnose the failure based on the Visual Description and Metrics (MSE/MAE). Give your suggestions. Don't ask any questions.
 
 ### Core PINN Principles:
 1. **Stiffness & Trivial Solutions**: If prediction is a flat line or zero, the model is stuck. -> Suggest **LBFGS**, significantly higher `bc_weight`, or specific activations (`silu`/`tanh`).

@@ -14,10 +14,10 @@ _client = OpenAI()
 BLOCKING_REGEX: List[str] = [
     r"\bos\.system\b",
     r"\bsubprocess\b",
-    r"\beval\s*\(",
+    r"(?<!\.)\beval\s*\(",  
     r"\bexec\s*\(",
     r"__import__\s*\(",
-    r"open\(.+['\"]w['\"]\)",  # 文件写入/覆盖
+    r"open\(.+['\"]w['\"]\)",
 ]
 
 # ---- 仅提示的告警类型（不阻断执行）----

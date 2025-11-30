@@ -22,7 +22,7 @@ BASELINE_HP = {
     "optimizer": "adam",
     "lr": 1e-3,
     "epochs": 2000,
-    "pde_collocation": 128,
+    "pde_collocation": 1024,
     "bc_weight": 10.0,
     "lr_scheduler_type": "step",
     "lr_decay_gamma": 0.9

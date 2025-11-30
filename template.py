@@ -76,14 +76,10 @@ def physics_loss(model, x_fixed):
     # 直接使用传入的固定点
     x = x_fixed.detach().requires_grad_(True)
     y = model(x)
-    # --- INJECTED PHYSICS CODE START ---
     {physics_code}
-    # --- INJECTED PHYSICS CODE END ---
 
 def boundary_loss(model, device):
-    # --- INJECTED BOUNDARY CODE START ---
     {boundary_code}
-    # --- INJECTED BOUNDARY CODE END ---
 
 def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
     torch.manual_seed(seed)
@@ -139,27 +135,37 @@ def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
             return loss
         opt.step(closure)
 
-    # Evaluation & Plotting (保持不变)
+    # Evaluation & Plotting
     mse = -1.0 
     mae = -1.0
+    
     with torch.no_grad():
-        xs_plot = torch.linspace(DOMAIN_MIN, DOMAIN_MAX, 200, device=device).unsqueeze(1)
-        # 如果是 2D (PDE), 这里 plotting_code 需要特殊处理，这里假设是 ODE 或 plotting_code 自带逻辑
-        # 为了兼容 Problems.py 里的绘图代码，我们需要确保变量名一致
-        pred_plot = model(xs_plot)
+        # 【关键修复】区分 ODE 和 PDE
+        if IN_DIM == 1:
+            # ODE 情况：生成默认的 1D 线性空间并预测
+            xs_plot = torch.linspace(DOMAIN_MIN, DOMAIN_MAX, 200, device=device).unsqueeze(1)
+            pred_plot = model(xs_plot)
+        else:
+            xs_plot = None
+            pred_plot = None
         
         plt.figure(figsize=(8, 5))
-        # --- INJECTED PLOTTING CODE START ---
+        
         {plotting_code}
         # --- INJECTED PLOTTING CODE END ---
+        
         plt.legend()
-        plt.title(f"Round {round_num} Result (Epochs: {EPOCHS})\\nMSE: {mse:.2e}")
+        plt.title(f"Round {round_num} Result (Epochs: {EPOCHS}, Opt: {OPTIMIZER})\nMSE: {mse:.2e}")
         plt.grid(True)
+        
         image_path = f"pinn_round_{round_num}_seed_{seed}.png"
         plt.savefig(image_path)
         plt.close()
 
-    final_loss = physics_loss(model, x_fixed) + BC_WEIGHT * boundary_loss(model, device)
+    x_final_eval = torch.rand(N_COL, IN_DIM, device=device)
+    x_final_eval = (DOMAIN_MAX - DOMAIN_MIN) * x_final_eval + DOMAIN_MIN
+
+    final_loss = physics_loss(model, x_final_eval.detach()) + BC_WEIGHT * boundary_loss(model, device)
     print(f"--- Round {round_num} Finished. Final Loss: {final_loss.item():.6e} ---\n")
         
     return {
