@@ -86,32 +86,32 @@ def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = PINN().to(device)
     
-    # 【关键修改】在训练循环开始前，生成一次固定的采样点
-    # 这模仿了你简单代码里的行为
     x_fixed_raw = torch.rand(N_COL, IN_DIM, device=device)
     x_fixed_val = (DOMAIN_MAX - DOMAIN_MIN) * x_fixed_raw + DOMAIN_MIN
-    x_fixed = x_fixed_val.detach() # 这是一个固定的 Tensor
+    x_fixed = x_fixed_val.detach()
 
     print(f"--- Round {round_num} Start Training (Opt: {OPTIMIZER}, Epochs: {EPOCHS}) ---")
 
     opt = None
     scheduler = None
+    loss_history = [] 
 
     if OPTIMIZER == "adam":
         opt = torch.optim.Adam(model.parameters(), lr=LR)
         
-        if LR_SCHEDULER_TYPE == "step":
+        # Scheduler setup
+        if hasattr(torch.optim.lr_scheduler, "StepLR") and "{lr_scheduler_type}" == "step":
             step_size = max(1, int(EPOCHS / 3))
-            scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=step_size, gamma=LR_DECAY_GAMMA)
-        elif LR_SCHEDULER_TYPE == "cosine":
+            scheduler = torch.optim.lr_scheduler.StepLR(opt, step_size=step_size, gamma={lr_decay_gamma})
+        elif hasattr(torch.optim.lr_scheduler, "CosineAnnealingLR") and "{lr_scheduler_type}" == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS, eta_min=LR * 0.01)
             
         for epoch in range(EPOCHS):
             opt.zero_grad()
-            # 【关键修改】传入固定的 x_fixed
             loss = physics_loss(model, x_fixed) + BC_WEIGHT * boundary_loss(model, device)
             loss.backward()
             opt.step()
+            loss_history.append(loss.item())
             
             if scheduler:
                 scheduler.step()
@@ -126,23 +126,21 @@ def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
         def closure():
             nonlocal lbfgs_iter
             opt.zero_grad()
-            # 【关键修改】传入固定的 x_fixed
             loss = physics_loss(model, x_fixed) + BC_WEIGHT * boundary_loss(model, device)
             loss.backward()
+            loss_history.append(loss.item())
+            
             if lbfgs_iter % 1000 == 0:
                 print(f"[LBFGS] Iter {lbfgs_iter:5d} | Loss: {loss.item():.6e}")
             lbfgs_iter += 1
             return loss
         opt.step(closure)
 
-    # Evaluation & Plotting
+    # --- 1 ---
     mse = -1.0 
     mae = -1.0
-    
     with torch.no_grad():
-        # 【关键修复】区分 ODE 和 PDE
         if IN_DIM == 1:
-            # ODE 情况：生成默认的 1D 线性空间并预测
             xs_plot = torch.linspace(DOMAIN_MIN, DOMAIN_MAX, 200, device=device).unsqueeze(1)
             pred_plot = model(xs_plot)
         else:
@@ -150,28 +148,38 @@ def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
             pred_plot = None
         
         plt.figure(figsize=(8, 5))
-        
+        # --- INJECTED PLOTTING CODE START ---
         {plotting_code}
         # --- INJECTED PLOTTING CODE END ---
-        
         plt.legend()
-        plt.title(f"Round {round_num} Result (Epochs: {EPOCHS}, Opt: {OPTIMIZER})\nMSE: {mse:.2e}")
+        plt.title(f"Round {round_num} Prediction (MSE: {mse:.2e})")
         plt.grid(True)
-        
-        image_path = f"pinn_round_{round_num}_seed_{seed}.png"
-        plt.savefig(image_path)
+        pred_image_path = f"pinn_pred_round_{round_num}_seed_{seed}.png"
+        plt.savefig(pred_image_path)
         plt.close()
 
-    x_final_eval = torch.rand(N_COL, IN_DIM, device=device)
-    x_final_eval = (DOMAIN_MAX - DOMAIN_MIN) * x_final_eval + DOMAIN_MIN
+    # --- 2 ---
+    plt.figure(figsize=(8, 5))
+    plt.plot(loss_history, label='Total Loss', color='purple', linewidth=1.5)
+    plt.yscale('log') 
+    plt.xlabel('Iterations')
+    plt.ylabel('Loss (Log Scale)')
+    plt.title(f"Round {round_num} Loss History")
+    plt.grid(True, which="both", ls="--", alpha=0.6)
+    plt.legend()
+    
+    loss_image_path = f"pinn_loss_round_{round_num}_seed_{seed}.png"
+    plt.savefig(loss_image_path)
+    plt.close()
 
-    final_loss = physics_loss(model, x_final_eval.detach()) + BC_WEIGHT * boundary_loss(model, device)
-    print(f"--- Round {round_num} Finished. Final Loss: {final_loss.item():.6e} ---\n")
+    final_loss = physics_loss(model, x_fixed) + BC_WEIGHT * boundary_loss(model, device)
+    print(f"--- Round {round_num} Finished. Final Loss: {final_loss.item():.6e} ---\\n")
         
     return {
         "final_loss": final_loss.item(), 
         "mse": mse, 
         "mae": mae, 
-        "image_path": image_path
+        "image_path": pred_image_path, 
+        "loss_image_path": loss_image_path
     }
 """
