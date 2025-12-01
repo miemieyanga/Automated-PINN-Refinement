@@ -30,7 +30,7 @@ You must suggest hyperparameter updates STRICTLY from the following available ch
 -> **Strategy**: Only suggest "Expensive" settings if the model is underfitting or failing (trivial solution). If performance is decent but slow, suggest cheaper alternatives.
 
 ### Goal:
-Propose 3-5 CONCRETE, actionable hyperparameter updates for the next round. 
+Propose 3-5 CONCRETE, actionable hyperparameter updates for the next round. One stage training Only. 
 Do not be limited to the above list; use your intuition. 
 """
         

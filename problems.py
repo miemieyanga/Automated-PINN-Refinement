@@ -35,27 +35,35 @@ PROBLEMS = {
 """
     },
 
-    "van_der_pol": {
+"van_der_pol": {
         "description": "Solve Van der Pol Oscillator: x'' - mu(1-x^2)x' + x = 0, mu=1.0. Range [0,10]. IC: x(0)=2, x'(0)=0.",
         "input_dim": 1,
         "output_dim": 1,
         "domain_range": [0.0, 10.0],
         
+        # 物理残差 (保持不变，兼容 x_fixed)
         "physics_code": """
     mu = 1.0
+    # x 和 y 由 template 传入
     dx_dt = autograd.grad(y, x, torch.ones_like(y), create_graph=True)[0]
     d2x_dt2 = autograd.grad(dx_dt, x, torch.ones_like(dx_dt), create_graph=True)[0]
     residue = d2x_dt2 - mu * (1 - y**2) * dx_dt + y
     return (residue**2).mean()
 """,
+        
+        # 边界条件 (保持不变)
         "boundary_code": """
+    # 强制 t=0 处的 x 和 x'
     t0 = torch.tensor([[0.0]], device=device).requires_grad_(True)
     x0 = model(t0)
     dx0_dt = autograd.grad(x0, t0, torch.ones_like(x0), create_graph=True)[0]
     return ((x0 - 2.0)**2 + (dx0_dt - 0.0)**2).mean()
 """,
-        # 【修改点】在这里加入 Scipy 真值生成 + MSE/MAE 计算
+        
+        # 绘图代码 (针对最新 template 优化)
+        # 注意：因为 IN_DIM=1，template 会自动生成 xs_plot 和 pred_plot，我们可以直接用
         "plotting_code": """
+        import numpy as np
         from scipy.integrate import solve_ivp
         
         # 1. 使用 Scipy 求解真值
@@ -64,7 +72,9 @@ PROBLEMS = {
             x, dx = z
             return [dx, mu*(1-x**2)*dx - x]
 
+        # xs_plot 已经是 template 生成好的 Tensor (200, 1)
         t_eval = xs_plot.cpu().numpy().flatten()
+        
         # 求解 IVP
         sol = solve_ivp(vdp_sys, [0, 10], [2, 0], t_eval=t_eval)
         true_vals_np = sol.y[0] # x(t)
@@ -72,14 +82,16 @@ PROBLEMS = {
         # 转回 Tensor 以便计算 MSE
         true_plot = torch.tensor(true_vals_np, dtype=torch.float32, device=device).unsqueeze(1)
         
-        # 2. 计算指标
+        # 2. 计算指标 (pred_plot 也是 template 生成好的)
         mse = torch.mean((pred_plot - true_plot)**2).item()
         mae = torch.mean(torch.abs(pred_plot - true_plot)).item()
 
         # 3. 绘图
         plt.plot(t_eval, true_vals_np, 'b-', label='Truth (RK45)', linewidth=2, alpha=0.6)
         plt.plot(xs_plot.cpu(), pred_plot.cpu(), 'r--', label='PINN', linewidth=2)
-        plt.xlabel("t"); plt.ylabel("x(t)")
+        plt.xlabel("t")
+        plt.ylabel("x(t)")
+        plt.title(f"Van der Pol (MSE: {mse:.2e})")
 """
     },
 "pendulum": {

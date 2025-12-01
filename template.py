@@ -34,9 +34,8 @@ class PINN(nn.Module):
         self.min_val = DOMAIN_MIN
         self.max_val = DOMAIN_MAX
         layers = [nn.Linear(in_dim, HIDDEN_WIDTH)]
-        # 第一层后加激活
         if ACTIVATION == "sin":
-             pass # sin 不需要实例化 nn.Module，直接在 forward 用 torch.sin
+             pass
         else:
              layers.append(_act(ACTIVATION) if not isinstance(_act(ACTIVATION), type) else _act(ACTIVATION)())
 
@@ -48,20 +47,17 @@ class PINN(nn.Module):
         layers.append(nn.Linear(HIDDEN_WIDTH, out_dim))
         self.net = nn.Sequential(*layers)
         
-        # 初始化
         for m in self.net.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        # 归一化输入到 [-1, 1]
         if self.max_val - self.min_val > 1e-6:
             x_norm = 2.0 * (x - self.min_val) / (self.max_val - self.min_val) - 1.0
         else:
             x_norm = x
-            
-        # 处理 sin 激活 (因为 torch.sin 不是 nn.Module)
+
         if ACTIVATION == "sin":
             for layer in self.net:
                 x_norm = layer(x_norm)
@@ -71,9 +67,7 @@ class PINN(nn.Module):
         else:
             return self.net(x_norm)
 
-# 【关键修改】把采样点作为参数传入，而不是在函数内生成
 def physics_loss(model, x_fixed):
-    # 直接使用传入的固定点
     x = x_fixed.detach().requires_grad_(True)
     y = model(x)
     {physics_code}
@@ -95,6 +89,17 @@ def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
     opt = None
     scheduler = None
     loss_history = [] 
+
+    # 1. --- Phase 1: Adam Warmup
+    if OPTIMIZER == "lbfgs":
+        print(">>> Phase 1: Adam Warmup (2000 steps) to escape trivial solution...")
+        opt_warmup = torch.optim.Adam(model.parameters(), lr=1e-3)
+        for i in range(2000):
+            opt_warmup.zero_grad()
+            loss = physics_loss(model, x_fixed) + BC_WEIGHT * boundary_loss(model, device)
+            loss.backward()
+            opt_warmup.step()
+        print(">>> Warmup finished. Switching to L-BFGS.")
 
     if OPTIMIZER == "adam":
         opt = torch.optim.Adam(model.parameters(), lr=LR)
@@ -120,8 +125,8 @@ def train_and_evaluate(seed=42, round_num=0, plot_filename="pinn_result.png"):
                 print(f"[Adam] Epoch {epoch:5d}/{EPOCHS} | Loss: {loss.item():.6e}")
             
     elif OPTIMIZER == "lbfgs":
-        opt = torch.optim.LBFGS(model.parameters(), lr=1.0, max_iter=EPOCHS, max_eval=EPOCHS*1.25, 
-                                history_size=50, line_search_fn="strong_wolfe")
+        opt = torch.optim.LBFGS(model.parameters(), lr=0.1, max_iter=EPOCHS, max_eval=EPOCHS*1.25, 
+                                history_size=50,line_search_fn="strong_wolfe",tolerance_grad=1e-7, tolerance_change=1e-9)
         lbfgs_iter = 0
         def closure():
             nonlocal lbfgs_iter
